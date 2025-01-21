@@ -276,8 +276,7 @@ async def get_video_thumbnail(video_file, duration):
         return None
     return output
 
-
-async def get_multiple_frames_thumbnail(video_file, layout, keep_screenshots):
+'''async def get_multiple_frames_thumbnail(video_file, layout, keep_screenshots):
     ss_nb = layout.split("x")
     ss_nb = int(ss_nb[0]) * int(ss_nb[1])
     dirpath = await take_ss(video_file, ss_nb)
@@ -323,6 +322,75 @@ async def get_multiple_frames_thumbnail(video_file, layout, keep_screenshots):
         if not keep_screenshots:
             await rmtree(dirpath, ignore_errors=True)
     return output
+'''
+async def get_multiple_frames_thumbnail(video_file, layout, keep_screenshots):
+    ss_nb = layout.split("x")
+    ss_nb = int(ss_nb[0]) * int(ss_nb[1])
+    dirpath = await take_ss(video_file, ss_nb)
+    if not dirpath:
+        return None
+    output_dir = f"{Config.DOWNLOAD_DIR}Thumbnails"
+    await makedirs(output_dir, exist_ok=True)
+    temp_output = ospath.join(output_dir, f"{time()}_temp.jpg")
+    final_output = ospath.join(output_dir, f"{time()}.jpg")
+    font_path = "default.otf"
+    
+    cmd = [
+        "xtra",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-pattern_type",
+        "glob",
+        "-i",
+        f"{escape(dirpath)}/*.png",
+        "-vf",
+        f"tile={layout}, thumbnail",
+        "-q:v",
+        "1",
+        "-frames:v",
+        "1",
+        "-f",
+        "mjpeg",
+        "-threads",
+        f"{max(1, cpu_count() // 2)}",
+        temp_output,
+    ]
+    try:
+        _, err, code = await wait_for(cmd_exec(cmd), timeout=60)
+        if code != 0 or not await aiopath.exists(temp_output):
+            LOGGER.error(
+                f"Error while combining thumbnails for video. Name: {video_file} stderr: {err}",
+            )
+            return None
+        
+        # Add watermark to the generated thumbnail
+        watermark_cmd = [
+            "xtra",
+            "-i",
+            temp_output,
+            "-vf",
+            f"drawtext=text='@TheAVStore':fontfile={font_path}:fontsize=20:x=10:y=10:fontcolor=white",
+            "-q:v",
+            "1",
+            final_output,
+        ]
+        _, err, code = await wait_for(cmd_exec(watermark_cmd), timeout=30)
+        if code != 0 or not await aiopath.exists(final_output):
+            LOGGER.error(
+                f"Error adding watermark to thumbnail. Name: {video_file} stderr: {err}",
+            )
+            return None
+    except Exception:
+        LOGGER.error(
+            f"Error while processing video. Name: {video_file}. Error: Timeout or processing issue!",
+        )
+        return None
+    finally:
+        if not keep_screenshots:
+            await rmtree(dirpath, ignore_errors=True)
+        await aiopath.remove(temp_output)
+    return final_output
 
 
 def is_mkv(file):
