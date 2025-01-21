@@ -2,6 +2,7 @@ import json
 import os
 from asyncio import create_subprocess_exec
 from asyncio.subprocess import PIPE
+import subprocess
 
 from bot import LOGGER
 
@@ -33,7 +34,7 @@ async def get_streams(file):
         return None
 
 
-# Lots of work need
+''' Lots of work need
 async def get_watermark_cmd(file, key):
     temp_file = f"{file}.temp.mkv"
     font_path = "default.otf"
@@ -57,7 +58,69 @@ async def get_watermark_cmd(file, key):
     ]
 
     return cmd, temp_file
+'''
+import os
+import subprocess
 
+async def get_watermark_cmd(file, key):
+    temp_file = f"{file}.temp.mkv"
+    font_path = "default.otf"
+
+    # Function to get video duration using ffprobe
+    def get_video_duration(video_file):
+        try:
+            result = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", video_file],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return float(result.stdout.strip())
+        except subprocess.CalledProcessError as e:
+            print("Error fetching video duration:", e)
+            return None
+
+    # Get duration of the video
+    duration = get_video_duration(temp_file)
+
+    if duration is None:
+        raise ValueError("Could not determine video duration.")
+
+    # Adjust watermark placement based on video length
+    if duration <= 10:
+        segments = [(0, duration)]  # Apply watermark to the entire video
+    elif duration <= 20:
+        segments = [(0, 5), (duration / 2 - 2.5, duration / 2 + 2.5), (duration - 5, duration)]
+    else:
+        mid_start = duration / 2 - 5
+        mid_end = mid_start + 10
+        end_start = max(0, duration - 10)
+        segments = [(0, 10), (mid_start, mid_end), (end_start, duration)]
+
+    # Build FFmpeg drawtext commands based on segments
+    vf_filters = ",".join(
+        f"drawtext=text='{key}':fontfile={font_path}:fontsize=20:fontcolor=white:x=10:y=10:enable='between(t,{start},{end})'"
+        for start, end in segments
+    )
+
+    cmd = [
+        "xtra",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-progress",
+        "pipe:1",
+        "-i",
+        file,
+        "-vf",
+        vf_filters,
+        "-threads",
+        f"{max(1, os.cpu_count() // 2)}",
+        temp_file,
+    ]
+
+    return cmd, temp_file
 
 async def get_metadata_cmd(file_path, key):
     """Processes a single file to update metadata."""
